@@ -38,6 +38,14 @@
 				<key>Path</key>
 				<string>SSDT-PNLF.aml</string>
 			</dict>
+			<dict>
+				<key>Comment</key>
+				<string>Ambient Light Sensor Device for macOS Backlight</string>
+				<key>Enabled</key>
+				<true/>
+				<key>Path</key>
+				<string>SSDT-ALS0.aml</string>
+			</dict>
 		</array>
 		<key>Delete</key>
 		<array/>
@@ -162,7 +170,27 @@
 	<key>DeviceProperties</key>
 	<dict>
 		<key>Add</key>
-		<dict/>
+		<dict>
+			<key>PciRoot(0x0)/Pci(0x8,0x1)/Pci(0x0,0x0)</key>
+			<dict>
+				<key>@0,built-in</key>
+				<data>
+				AQAAAA==
+				</data>
+				<key>@0,connector-type</key>
+				<data>
+				AgAAAA==
+				</data>
+				<key>AAPL,slot-name</key>
+				<string>built-in</string>
+				<key>applbkl</key>
+				<data>
+				AQAAAA==
+				</data>
+				<key>device_type</key>
+				<string>VGA compatible controller</string>
+			</dict>
+		</dict>
 		<key>Delete</key>
 		<dict/>
 	</dict>
@@ -280,13 +308,31 @@
 			</dict>
 			<dict>
 				<key>Arch</key>
+				<string>x86_64</string>
+				<key>BundlePath</key>
+				<string>SMCLightSensor.kext</string>
+				<key>Comment</key>
+				<string>VirtualSMC Light Sensor</string>
+				<key>Enabled</key>
+				<true/>
+				<key>ExecutablePath</key>
+				<string>Contents/MacOS/SMCLightSensor</string>
+				<key>MaxKernel</key>
+				<string></string>
+				<key>MinKernel</key>
+				<string></string>
+				<key>PlistPath</key>
+				<string>Contents/Info.plist</string>
+			</dict>
+			<dict>
+				<key>Arch</key>
 				<string>Any</string>
 				<key>BundlePath</key>
 				<string>SMCBatteryManager.kext</string>
 				<key>Comment</key>
 				<string>SMCBatteryManager</string>
 				<key>Enabled</key>
-				<false/>
+				<true/>
 				<key>ExecutablePath</key>
 				<string>Contents/MacOS/SMCBatteryManager</string>
 				<key>MaxKernel</key>
@@ -1789,7 +1835,7 @@
 				Rg==
 				</data>
 				<key>boot-args</key>
-				<string>alcid=3 -no_compat_check npci=0x3000 rtcfx_exclude=58-59 -nvmefaspm=0 applbkl=3</string>
+				<string>alcid=3 -no_compat_check npci=0x3000 rtcfx_exclude=58-59 -nvmefaspm=0 AMDBacklight=1 radpg=15</string>
 				<key>csr-active-config</key>
 				<data>
 				AAAAAA==
@@ -2070,7 +2116,7 @@
 			<key>Resolution</key>
 			<string>Max</string>
 			<key>SanitiseClearScreen</key>
-			<false/>
+			<true/>
 			<key>TextRenderer</key>
 			<string>BuiltinGraphics</string>
 			<key>UIScale</key>
