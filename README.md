@@ -21,7 +21,17 @@ Este proyecto documenta la configuración del gestor de arranque, optimizaciones
 
 Para lograr una interfaz gráfica limpia y moderna con exactamente **3 iconos horizontales**, se configuró **rEFInd** como gestor principal de la placa UEFI:
 
+```mermaid
+graph TD
+    UEFI["Placa Base UEFI (HP 84A2)"] --> rEFInd["rEFInd Boot Manager (/EFI/refind)"]
+    rEFInd -->|Icono 1: Debian| GRUB["GRUBx64 (/EFI/debian/grubx64.efi)"]
+    rEFInd -->|Icono 2: Windows| WIN["Bootmgfw (/EFI/Microsoft/Boot/bootmgfw.efi)"]
+    rEFInd -->|Icono 3: macOS| OC["OpenCore (/EFI/OC/OpenCore.efi)"]
+    OC --> macOS["macOS Monterey 12.7.6 (APFS nvme0n1p5)"]
+```
+
 ### Estructura en `/boot/efi/EFI/refind/refind.conf`:
+
 * **Tema visual:** `refind-theme-regular` (iconos redondeados `128x128px` con fondo oscuro).
 * **Escaneo:** `scanfor manual,external` (para ocultar entradas duplicadas y herramientas no deseadas).
 * **Entradas declaradas:**
@@ -71,34 +81,93 @@ Para evitar un menú secundario tras seleccionar macOS en rEFInd:
 
 ### A. Corrupción de pantalla al apagar:
 * **Causa:** El argumento `-nredfbonly` forzaba a NootedRed a correr en modo Framebuffer Only sin aceleración completa de hardware Metal (QE/CI), rompiendo la sincronización de energía del panel eDP antes de cortar la corriente.
-* **Solución:** Retirado `-nredfbonly` de `boot-args`.
+* **Solución:** Retirado `-nredfbonly` de `boot-args` y configurado `radpg=15` para estabilizar el subsistema de energía de los bloques DCN1 de Raven Ridge.
 
-### B. Control de Brillo: Arquitectura (GPU PWM vs. ACPI Firmware) y Solución macOS:
-* **Diferencias de control en hardware:**
-  1. **Control Firmware / ACPI (BIOS/EC):** Métodos como `_BCM` o interfaces propietarias WMI (HP Hotkeys). Windows y Linux pueden usarlo mediante el Embedded Controller, pero suele tener saltos discretos o causar colisiones cuando coexiste con el driver gráfico.
-  2. **Control Directo de GPU (PWM Hardware):** El driver escribe directo a los registros del controlador de pantalla (`amdgpu_bl0`), modulando la señal de pulso (PWM) del bus eDP.
-* **Comportamiento en macOS:**
-  * macOS **no** utiliza métodos ACPI (`_BCM`/WMI) para regular la luz de fondo; depende exclusivamente de `AppleBacklight` interactuando con los registros de la GPU.
-  * Para que macOS reconozca la pantalla interna eDP y active el driver de luz de fondo, requiere un dispositivo ACPI simulado `PNLF` (`Device (PNLF)`) situado bajo la ruta de la iGPU con el identificador adecuado para AMD Raven Ridge (`_UID = 0x11` / 17 decimal).
-* **Ruta ACPI del Panel en HP Laptop 14-cm0xxx:**
-  ```text
-  \_SB.PCI0.GP17.VGA.LCD
-  ```
-* **Implementación aplicada:**
-  1. **Tabla `SSDT-PNLF.aml`:**
-     * **`Scope (\_SB)`**: Ubicación global requerida por la especificación de Apple para que el subsistema ACPI registre el dispositivo `PNLF` (`APP0002`) en el catálogo raíz de hardware de pantalla.
-     * **`Name (_UID, 0x13)`**: Identificador 19 decimal requerido para motores de pantalla AMD **DCN1** (*Display Core Next 1.0*) presentes en la arquitectura Raven Ridge (`1002:15dd`).
-  2. **Inyección de Conector eDP (`DeviceProperties -> Add -> PciRoot(0x0)/Pci(0x8,0x1)/Pci(0x0,0x0)`):**
-     * Inyección forzada de **`@0,connector-type = <00 04 00 00>`** (eDP) y **`@0,built-in = <01 00 00 00>`**.
-  3. **Argumentos de arranque (NVRAM -> boot-args):**
-     * **`applbkl=3`**: Acopla el control PWM a los registros de la GPU AMD Vega.
-     * **`radpg=15`**: Deshabilita el power-gating agresivo en los bloques DCN1 de Raven Ridge para prevenir el fallo `0xe00002bc` durante las transiciones de apagado.
-  4. **Control por Teclado:**
-     * Enlace de eventos de teclas de brillo con `BrightnessKeys.kext`.
+### B. Control de Brillo Nativo y Teclas Fn (¡100% Funcional!):
+* **El reto en portátiles con APU AMD Raven Ridge:**
+  1. En Macs originales, las pantallas internas se gestionan a través del stack de Intel IGPU o Apple Silicon. NootedRed emula el soporte Display Core de AMD sobre controladores Navi (`AMDRadeonX6000Framebuffer`).
+  2. Para que macOS envíe las señales de modulación de brillo (`'bklt'`), el subsistema IOKit (`IOGraphicsFamily`) debe emparejar la clase de servicio **`AppleBacklightDisplay`**.
+  3. Si la pantalla se detecta como **`AppleDisplay`** (monitor externo genérico), el menú y el HUD gráfico se mueven, pero la corriente física hacia los LEDs del panel nunca varía.
+* **La Solución Completa Implementada:**
+  1. **Inyección de Conector LVDS/eDP (`DeviceProperties`):**
+     * En `PciRoot(0x0)/Pci(0x8,0x1)/Pci(0x0,0x0)`:
+     * `@0,connector-type` = `<02 00 00 00>` (Base64: `AgAAAA==`), identificando la salida de video `@0` explícitamente como panel integrado interno.
+     * `@0,built-in` = `<01 00 00 00>` (Base64: `AQAAAA==`).
+     * `applbkl` = `<01 00 00 00>` (Base64: `AQAAAA==`).
+  2. **Tabla ACPI `SSDT-PNLF.aml` bajo la GPU:**
+     * Ubicación exacta: `Scope (\_SB.PCI0.GP17.VGA)`.
+     * Identificadores: `_HID = "APP0002"`, `_CID = "backlight"`, `_UID = 0x13` (19 decimal, perfil requerido para el motor DCN1 en NootedRed).
+  3. **Sensor de Luz Ambiental Simulado (`SSDT-ALS0` y `SMCLightSensor`):**
+     * Desde macOS Catalina (10.15) y Monterey (12.x), el framework de control de pantalla requiere un sensor de luz ambiental (`ALS0`). Se incluyó `SSDT-ALS0.aml` y `SMCLightSensor.kext` vinculado a VirtualSMC.
+  4. **Argumentos de Arranque (NVRAM -> boot-args):**
+     * `AMDBacklight=1`: Parámetro oficial de NootedRed para activar la modulación de retroiluminación en laptops.
+     * `radpg=15`: Estabilización de power-gating en DCN1.
+  5. **Control por Teclado:**
+---
+
+## 6. Resumen de Tablas ACPI, Kexts y Parámetros OpenCore
+
+### Tablas ACPI Personalizadas (`EFI/OC/ACPI/` y `./acpi/`)
+| Tabla SSDT | Alcance (Scope) | Propósito Técnico |
+|---|---|---|
+| `SSDT-PNLF.aml` | `\_SB.PCI0.GP17.VGA` | Inyecta `Device (PNLF)` con `_UID = 0x13` y `_CID = "backlight"` para modulación física de brillo en Raven Ridge (DCN1). |
+| `SSDT-ALS0.aml` | `\_SB` | Inyecta `Device (ALS0)` simulando el sensor de luz ambiental Apple, requerido por macOS 10.15+. |
+| `SSDT-CPUR.aml` | `\_SB` | Reinyección de objetos de procesador para topología multinúcleo AMD Ryzen en macOS. |
+| `SSDT-EC-USBX-LAPTOP.aml` | `\_SB` | Dispositivo de control integrado falso (`EC`) y tablas de amperaje USB para portátiles. |
+
+### Extensiones de Kernel (`EFI/OC/Kexts/`)
+| Kext | Rol / Subsistema | Funcionalidad |
+|---|---|---|
+| `Lilu.kext` | Core Framework | Motor de inyección y parcheo dinámico en memoria para macOS. |
+| `VirtualSMC.kext` | Core SMC | Emulador del chip SMC de Apple. |
+| `SMCBatteryManager.kext` | Batería | Monitoreo nativo de porcentaje, estado de carga/descarga y salud (`BAT0`). |
+| `SMCLightSensor.kext` | Sensor de Luz | Interfaz con `SSDT-ALS0` para cumplir el requerimiento de brillo de macOS. |
+| `SMCProcessor.kext` | CPU Térmico | Lecturas de temperatura de los núcleos de la APU AMD. |
+| `NootedRed.kext` | Gráficos Metal | Aceleración gráfica Metal 2 completa (QE/CI) y Display Core DCN1 para AMD Vega Mobile. |
+| `AppleALC.kext` | Sonido HDA | Controlador de audio nativo configurado con `alcid=3` (Realtek ALC236). |
+| `BrightnessKeys.kext` | Teclas Especiales | Enlace directo entre eventos ACPI de brillo (F2/F3) y el OSD nativo de macOS. |
+| `ECEnabler.kext` | ACPI EC | Permite a macOS leer campos de registro mayores a 8 bits en el EC de HP. |
+| `NVMeFix.kext` | Almacenamiento | Gestión autónoma de estados de energía (APST) en SSDs NVMe no Apple. |
+| `RTCMemoryFixup.kext` | RTC / CMOS | Evita sobreescritura de los offsets RTC 58-59 para impedir alertas de reseteo de BIOS HP. |
+| `VoodooPS2Controller.kext` | Teclado | Manejador del teclado interno PS/2 del portátil. |
+| `VoodooI2C.kext` + `VoodooI2CHID.kext` | Touchpad | Manejador del trackpad I2C con gestos multitáctiles. |
+| `HoRNDIS.kext` | Red Tethering | Controlador para compartir internet por cable USB desde smartphone Android. |
+| `USBToolBox.kext` | Puertos USB | Mapeo de puertos USB 2.0 y USB 3.0 del equipo. |
+
+### Argumentos de Arranque (`NVRAM -> boot-args`)
+```text
+alcid=3 -no_compat_check npci=0x3000 rtcfx_exclude=58-59 -nvmefaspm=0 AMDBacklight=1 radpg=15
+```
+* **`alcid=3`**: Layout-id de audio funcional para Realtek ALC236.
+* **`-no_compat_check`**: Omite la validación estricta de modelo de hardware Apple.
+* **`npci=0x3000`**: Resuelve la contención de espacio de memoria MMIO en buses PCI para APUs AMD.
+* **`rtcfx_exclude=58-59`**: Previene la corrupción del RTC en placas HP al reiniciar o apagar.
+* **`-nvmefaspm=0`**: Estabiliza el bus PCIe del SSD NVMe evitando bloqueos de entrada/salida.
+* **`AMDBacklight=1`**: Activa la modulación de retroiluminación en NootedRed para portátiles.
+* **`radpg=15`**: Estabiliza el subsistema de energía en bloques gráficos DCN1, eliminando la corrupción de pantalla al apagar.
+
+### Inyección de `DeviceProperties` (`config.plist`)
+```xml
+<key>PciRoot(0x0)/Pci(0x8,0x1)/Pci(0x0,0x0)</key>
+<dict>
+    <key>@0,built-in</key>
+    <data>AQAAAA==</data>
+    <key>@0,connector-type</key>
+    <data>AgAAAA==</data>
+    <key>AAPL,slot-name</key>
+    <string>built-in</string>
+    <key>applbkl</key>
+    <data>AQAAAA==</data>
+    <key>device_type</key>
+    <string>VGA compatible controller</string>
+</dict>
+```
+* **Nota crítica:** `@0,connector-type` con valor `<02 00 00 00>` (`AgAAAA==`) es la clave que permite a macOS reconocer la pantalla como panel interno (LVDS / eDP) y cargar `AppleBacklightDisplay`.
 
 ---
 
-## 6. Estado de Hardware Pendiente y Diagnóstico
+## 7. Estado de Hardware Pendiente y Diagnóstico
+
 
 ### A. Batería (SMCBatteryManager - Funcional):
 * **Estado:** Totalmente resuelto al habilitar `SMCBatteryManager.kext = True` junto a `ECEnabler.kext`. Porcentaje y estado de carga se leen nativamente desde `BAT0`.
@@ -121,7 +190,7 @@ Para evitar un menú secundario tras seleccionar macOS en rEFInd:
 
 ---
 
-## 7. Scripts de Diagnóstico Automatizado
+## 8. Scripts de Diagnóstico Automatizado
 
 Para depurar problemas desde macOS sin necesidad de adivinar el estado de IOReg o kernel logs:
 
@@ -139,7 +208,7 @@ Para depurar problemas desde macOS sin necesidad de adivinar el estado de IOReg 
 
 ---
 
-## 8. Desarrollo de Parches Manuales & Contribución Comunitaria (GitHub)
+## 9. Desarrollo de Parches Manuales & Contribución Comunitaria (GitHub)
 
 ### A. Diagnóstico de Bajo Nivel del Hardware (AMD Raven Ridge):
 * **Por qué falló MonitorControl / DDC-CI:**
@@ -171,9 +240,13 @@ Al analizar exhaustivamente el reporte refinado `reporte_refinado_20261003_09380
 
 ---
 
-## 9. Copias de Respaldo
+## 10. Copias de Respaldo y Archivos del Repositorio
 
-En la carpeta `./backups` se incluyen copias de los archivos de configuración funcionales:
-* `backups/config.plist`: Configuración activa de OpenCore (con `SMCBatteryManager.kext`, `SMCLightSensor.kext`, `SSDT-ALS0`, `SSDT-PNLF` bajo `GP17.VGA`, `connector-type` LVDS y `AMDBacklight=1`).
-* `backups/refind.conf`: Configuración activa de rEFInd.
+En este repositorio se incluyen todos los archivos de configuración y tablas ACPI funcionales:
+* `backups/config.plist`: Configuración activa y probada de OpenCore (con `SMCBatteryManager.kext`, `SMCLightSensor.kext`, `SSDT-ALS0`, `SSDT-PNLF` bajo `GP17.VGA`, `connector-type` LVDS y `AMDBacklight=1`).
+* `backups/refind.conf`: Configuración activa de rEFInd con 3 iconos limpios.
+* `acpi/SSDT-PNLF.dsl` y `acpi/SSDT-PNLF.aml`: Código fuente ASL y binario compilado para el backlight de Raven Ridge DCN1.
+* `acpi/SSDT-ALS0.dsl` y `acpi/SSDT-ALS0.aml`: Código fuente ASL y binario para emular el sensor de luz ambiental.
+* `scripts/`: Herramientas de diagnóstico automatizado para macOS.
+
 
