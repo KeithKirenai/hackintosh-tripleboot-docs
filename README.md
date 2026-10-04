@@ -79,9 +79,14 @@ Para evitar un menú secundario tras seleccionar macOS en rEFInd:
 
 ## 5. Gráficos, Apagado y Control de Brillo (NootedRed)
 
-### A. Corrupción de pantalla al apagar:
-* **Causa:** El argumento `-nredfbonly` forzaba a NootedRed a correr en modo Framebuffer Only sin aceleración completa de hardware Metal (QE/CI), rompiendo la sincronización de energía del panel eDP antes de cortar la corriente.
-* **Solución:** Retirado `-nredfbonly` de `boot-args` y configurado `radpg=15` para estabilizar el subsistema de energía de los bloques DCN1 de Raven Ridge.
+### A. Estabilidad gráfica y logo limpio al apagar/reiniciar:
+* **Causas resueltas:**
+  1. El argumento `-nredfbonly` forzaba a NootedRed a correr en modo Framebuffer Only sin aceleración completa de hardware Metal (QE/CI), rompiendo la sincronización de energía del panel eDP antes de cortar la corriente.
+  2. `SanitiseClearScreen = True` junto a `TextRenderer = BuiltinGraphics` corrompía la memoria de vídeo del framebuffer en el apagado.
+  3. `Resolution = Max` causaba discrepancia entre el modo UEFI por defecto (1024x768 @ 4:3) y el panel nativo de 1366x768 @ 16:9, distorsionando y rasgando el logo de Apple.
+* **Solución aplicada:**
+  * Retirado `-nredfbonly` de `boot-args` y configurado `radpg=15` para estabilizar el subsistema de energía de los bloques DCN1 de Raven Ridge.
+  * Ajuste en `UEFI -> Output`: `SanitiseClearScreen = False` y `Resolution = 1366x768` para garantizar alineación de píxeles exacta y logo de Apple 100% nítido sin distorsión.
 
 ### B. Control de Brillo Nativo y Teclas Fn (¡100% Funcional!):
 * **El reto en portátiles con APU AMD Raven Ridge:**
@@ -172,11 +177,14 @@ alcid=3 -no_compat_check npci=0x3000 rtcfx_exclude=58-59 -nvmefaspm=0 AMDBacklig
 ### A. Batería (SMCBatteryManager - Funcional):
 * **Estado:** Totalmente resuelto al habilitar `SMCBatteryManager.kext = True` junto a `ECEnabler.kext`. Porcentaje y estado de carga se leen nativamente desde `BAT0`.
 
-### B. Corrupción gráfica del logo al apagar:
-* **Diagnóstico profundo con reporte V2:**
-  * El kernel reportó el fallo: `IOReturn IOAccelDisplayPipeTransaction2::set_transaction_args returning error 0xe00002bc for transaction(3/4)`.
-  * Este error demuestra que el driver de aceleración Metal de AMD (`IOAcceleratorFamily2`) rechaza la transacción de cambio de modo de pantalla que el kernel solicita justo antes de apagar la GPU.
-  * `DirectGopRendering = True` intensificaba la rotura al intentar escribir directo a un búfer UEFI desalineado; se restauró `DirectGopRendering = False` y se mantiene `SanitiseClearScreen = True` junto a `ProvideConsoleGop = True`.
+### B. Solución Definitiva para el Logo de Apple al Apagar/Reiniciar (¡Resuelto!):
+* **Causa Raíz:**
+  1. **Incompatibilidad de SanitiseClearScreen:** Con el renderizador `TextRenderer = BuiltinGraphics`, la opción `SanitiseClearScreen = True` generaba una sobreescritura errónea del búfer de pantalla durante la transición del kernel al firmware.
+  2. **Desincronización de Stride / Resolución en GOP:** Con `Resolution = Max`, la BIOS InsydeH2O de HP negociaba por defecto modos VESA estándar (1024x768 @ 4:3), desalineando el pitch o ancho de línea (*bytes per row*) respecto a la resolución nativa de 1366x768 del panel. Al desmontar el servidor de ventanas (`WindowServer`) en el apagado, la devolución al framebuffer causaba que el logo de Apple se mostrara estirado, con líneas rasgadas y artefactos gráficos.
+* **Solución Aplicada en OpenCore (`UEFI -> Output`):**
+  * **`SanitiseClearScreen = False`**: Desactiva el reseteo agresivo del búfer lineal, permitiendo una transición suave del framebuffer.
+  * **`Resolution = 1366x768`**: Fija la resolución UEFI al tamaño físico nativo del panel LCD, garantizando la proporción de aspecto 16:9 perfecta y la alineación exacta de memoria de vídeo (stride) en el apagado.
+  * **`DirectGopRendering = False`** y **`ProvideConsoleGop = True`**: Mantiene la compatibilidad con el controlador GOP del firmware de HP sin bypass desincronizado.
 
 ### C. Conectividad Inalámbrica (Wi-Fi y Bluetooth):
 * **Wi-Fi:** `Realtek RTL8723DE` (`10ec:d723` PCIe). No cuenta con soporte nativo en macOS.
