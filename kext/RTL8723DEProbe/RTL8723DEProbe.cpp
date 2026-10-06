@@ -1,6 +1,7 @@
 #include "RTL8723DEProbe.h"
 #include <IOKit/IOLib.h>
 
+#define super IOService
 OSDefineMetaClassAndStructors(RTL8723DEProbe, IOService)
 
 IOService *RTL8723DEProbe::probe(IOService *provider, SInt32 *score)
