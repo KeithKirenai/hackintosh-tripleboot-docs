@@ -1,0 +1,21 @@
+name: build-kext
+on:
+  push:
+    paths:
+      - 'kext/**'
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build RTL8723DEProbe.kext
+        run: |
+          cd kext/RTL8723DEProbe
+          chmod +x build_kext.sh
+          ./build_kext.sh
+      - name: Upload kext artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RTL8723DEProbe.kext
+          path: kext/RTL8723DEProbe/build/RTL8723DEProbe.kext
