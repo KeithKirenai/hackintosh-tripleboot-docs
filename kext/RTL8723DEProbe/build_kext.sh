@@ -24,7 +24,7 @@ ld -arch x86_64 -bundle -undefined dynamic_lookup \
   -sectcreate __TEXT __info_plist "$OUT/info.plist" \
   "$OUT/RTL8723DEProbe.o" -o "$KEXT/MacOS/RTL8723DEProbe"
 
-cp Contents/Info.plist "$KEXT/Contents/Info.plist"
+cp Contents/Info.plist "$KEXT/Info.plist"
 mkdir -p "$KEXT/Resources"
 
 echo "Kext empaquetado en $OUT/RTL8723DEProbe.kext"
