@@ -12,6 +12,7 @@ KEXT="$OUT/RTL8723DEProbe.kext/Contents"
 mkdir -p "$KEXT/MacOS" "$KEXT/Resources" "$OUT"
 
 clang++ -arch x86_64 -target x86_64-apple-macos12 \
+  -fapple-kext \
   -isysroot "$SDK" \
   -I"$KERN" -I"$KERN/libkern" -I"$KERN/IOKit" \
   -fno-exceptions -fno-rtti -fno-builtin -fvisibility=hidden \
@@ -20,7 +21,7 @@ clang++ -arch x86_64 -target x86_64-apple-macos12 \
 
 cp Contents/Info.plist "$OUT/info.plist"
 
-ld -arch x86_64 -bundle -undefined dynamic_lookup \
+ld -arch x86_64 -kext -undefined dynamic_lookup \
   -sectcreate __TEXT __info_plist "$OUT/info.plist" \
   "$OUT/RTL8723DEProbe.o" -o "$KEXT/MacOS/RTL8723DEProbe"
 
